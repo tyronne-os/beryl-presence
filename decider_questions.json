@@ -1,0 +1,38 @@
+{
+  "turn": {
+    "route": {
+      "type": "choice",
+      "instructions": "The user just finished speaking to Beryl, a warm conversational companion on a live video call. How should Beryl respond?",
+      "criteria": {
+        "answer": {"what": "The user asked something, shared something that invites a reply, or said something Beryl should answer in words", "not_for": "An unfinished sentence or a hesitation sound"},
+        "backchannel": {"what": "A brief remark, agreement, or aside where a short acknowledgement such as 'mm-hm' or 'right' is the natural response", "not_for": "A question"},
+        "wait": {"what": "The user stopped mid-sentence and is clearly still going, so Beryl should stay quiet and keep listening", "not_for": "A complete sentence"}
+      }
+    },
+    "tone": {
+      "type": "choice",
+      "instructions": "Which tone of voice should Beryl use for her reply?",
+      "criteria": {
+        "warm": "Friendly and relaxed everyday conversation",
+        "playful": "The user is joking, teasing, or being light-hearted",
+        "empathetic": "The user shared something sad, stressful, or personal",
+        "focused": "The user wants clear information or help with a task"
+      }
+    },
+    "frustration": {
+      "type": "score",
+      "instructions": "How frustrated is the user?",
+      "criteria": ["calm", "irritated", "angry or about to leave"]
+    }
+  },
+  "reply_check": {
+    "on_topic": {
+      "type": "noul",
+      "instructions": "Is Beryl's reply a sensible, on-topic spoken response to what the user said?",
+      "criteria": {
+        "true": "It responds naturally to the user's message",
+        "false": "It ignores the message, contradicts itself, or is not something a person would say out loud"
+      }
+    }
+  }
+}

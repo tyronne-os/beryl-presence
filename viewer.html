@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beryl Live</title>
+<style>
+  :root { --bg:#05070a; --panel:#0b0f16; --line:#1b2433; --text:#eef3fb; --muted:#8b98ad; --blue:#3db4ff;
+          --gold:#f0c14d; --purple:#a78bfa; --ok:#3dde9a; --bad:#ff6b7a; --mono:ui-monospace,Consolas,monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:16px; }
+  .wrap { max-width:1120px; margin:0 auto; display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:16px; }
+  @media (max-width:860px) { .wrap { grid-template-columns:1fr; } }
+  h1 { font-size:15px; letter-spacing:.12em; text-transform:uppercase; color:var(--gold); margin:0 0 10px; grid-column:1/-1; }
+  .stage { background:#000; border:1px solid var(--line); border-radius:14px; overflow:hidden; aspect-ratio:1/1; max-width:100%; }
+  canvas { width:100%; height:100%; display:block; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  button, input { font:inherit; border-radius:8px; border:1px solid var(--line); background:#111826; color:var(--text); padding:8px 12px; }
+  button { cursor:pointer; } button:focus-visible, input:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+  button.primary { background:var(--blue); color:#021018; border-color:var(--blue); font-weight:600; }
+  input { flex:1; min-width:0; }
+  .pill { font-family:var(--mono); font-size:12px; padding:6px 10px; border-radius:999px; border:1px solid var(--line); text-align:center; }
+  .pill.ok { color:var(--ok); border-color:var(--ok); } .pill.bad { color:var(--bad); border-color:var(--bad); } .pill.idle { color:var(--muted); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; font-size:12px; }
+  .kv span:nth-child(odd) { color:var(--muted); } .kv span:nth-child(even) { font-family:var(--mono); text-align:right; }
+  .label { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+  .decider { color:var(--purple); }
+  #log { font-family:var(--mono); font-size:12px; height:180px; overflow:auto; border-top:1px solid var(--line); padding-top:8px; }
+  #log div { padding:2px 0; } .you { color:var(--blue); } .her { color:var(--text); } .sys { color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Beryl · live pipeline</h1>
+  <div class="stage"><canvas id="cv" width="512" height="512" aria-label="Beryl video"></canvas></div>
+  <div class="panel">
+    <div class="row">
+      <button id="start" class="primary">Connect</button>
+      <button id="mic" disabled>Mic off</button>
+    </div>
+    <div class="row">
+      <input id="msg" placeholder="Type a message…" aria-label="Message" disabled>
+      <button id="send" disabled>Send</button>
+    </div>
+    <div>
+      <div class="label">Is she talking? (talking probe, painted pixels)</div>
+      <div id="verdict" class="pill idle">not connected</div>
+    </div>
+    <div>
+      <div class="label decider">B.B.P Decider</div>
+      <div class="kv">
+        <span>route</span><span id="d-route">—</span>
+        <span>tone</span><span id="d-tone">—</span>
+        <span>latency / source</span><span id="d-ms">—</span>
+        <span>reply on-topic</span><span id="d-check">—</span>
+        <span>fallback rate</span><span id="d-fb">—</span>
+      </div>
+    </div>
+    <div>
+      <div class="label">Pipeline</div>
+      <div class="kv">
+        <span>render speed (RTF, &lt;1 = real time)</span><span id="p-rtf">—</span>
+        <span>end of speech → her voice</span><span id="p-turn">—</span>
+        <span>sync r / mouth motion</span><span id="p-sync">—</span>
+        <span>GPU used</span><span id="p-gpu">—</span>
+      </div>
+    </div>
+    <div id="log" aria-live="polite"></div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('cv'), g = cv.getContext('2d');
+let ws, ctx, nextT = 0, sources = [], micNode, micStream;
+
+function log(cls, text) {
+  const d = document.createElement('div'); d.className = cls; d.textContent = text;
+  $('log').appendChild(d); $('log').scrollTop = 1e9;
+}
+function setVerdict(v, detail) {
+  const el = $('verdict');
+  el.textContent = v + (detail ? '  ' + detail : '');
+  el.className = 'pill ' + (v === 'TALKING_IN_SYNC' || v === 'IDLE_SILENT' ? 'ok' : v === 'TALKING_OUT_OF_SYNC' ? 'idle' : 'bad');
+}
+function playPcm(buf) {
+  const i16 = new Int16Array(buf), f = new Float32Array(i16.length);
+  for (let k = 0; k < i16.length; k++) f[k] = i16[k] / 32768;
+  const ab = ctx.createBuffer(1, f.length, 16000); ab.copyToChannel(f, 0);
+  const s = ctx.createBufferSource(); s.buffer = ab; s.connect(ctx.destination);
+  const t = Math.max(ctx.currentTime + 0.02, nextT); s.start(t); nextT = t + ab.duration;
+  sources.push(s); s.onended = () => { sources = sources.filter(x => x !== s); };
+}
+function stopAudio() { sources.forEach(s => { try { s.stop(); } catch (e) {} }); sources = []; nextT = 0; }
+
+async function onMessage(ev) {
+  if (typeof ev.data !== 'string') {
+    const kind = new Uint8Array(ev.data, 0, 1)[0], body = ev.data.slice(1);
+    if (kind === 1) { const bmp = await createImageBitmap(new Blob([body], { type: 'image/jpeg' })); g.drawImage(bmp, 0, 0, 512, 512); bmp.close(); }
+    else if (kind === 2) playPcm(body);
+    return;
+  }
+  const m = JSON.parse(ev.data);
+  if (m.type === 'hello') log('sys', 'connected · boot ' + JSON.stringify(m.boot));
+  else if (m.type === 'transcript') log('you', 'you: ' + m.text + '  (' + m.stt_ms + ' ms STT)');
+  else if (m.type === 'decision') {
+    $('d-route').textContent = m.route + '  p=' + m.route_confidence.toFixed(2);
+    $('d-tone').textContent = m.tone + '  frustration=' + m.frustration.toFixed(2);
+    $('d-ms').textContent = m.latency_ms.toFixed(1) + ' ms / ' + m.source;
+  }
+  else if (m.type === 'reply_check') $('d-check').textContent = 'p=' + m.p_on_topic + ' / ' + m.source;
+  else if (m.type === 'say') log('her', 'beryl: ' + m.text);
+  else if (m.type === 'probe') {
+    setVerdict(m.verdict, m.mismatch ? '· stage mismatch' : '');
+    $('p-sync').textContent = m.sync_r.toFixed(2) + ' / ' + m.mouth_motion.toFixed(4);
+  }
+  else if (m.type === 'barge_in') { stopAudio(); log('sys', 'you interrupted — she stopped'); }
+  else if (m.type === 'alert' || m.type === 'error') log('sys', '! ' + (m.where ? m.where + ': ' : '') + m.message);
+}
+
+async function pollHealth() {
+  try {
+    const h = await (await fetch('/health')).json();
+    $('p-rtf').textContent = h.render.rtf_p50 == null ? '—' : h.render.rtf_p50.toFixed(2) + (h.render.realtime ? '' : '  (too slow)');
+    $('p-turn').textContent = h.turn_latency_ms_p50 == null ? '—' : Math.round(h.turn_latency_ms_p50) + ' ms';
+    $('d-fb').textContent = h.decider.fallback_rate == null ? '—' : h.decider.fallback_rate + '  (p50 ' + h.decider.p50_ms + ' ms)';
+    $('p-gpu').textContent = h.gpu.used_gb_all_processes + ' / ' + h.gpu.total_gb + ' GB';
+  } catch (e) {}
+}
+
+$('start').onclick = () => {
+  ctx = new AudioContext({ sampleRate: 16000 });
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = onMessage;
+  ws.onopen = () => { $('mic').disabled = $('msg').disabled = $('send').disabled = false; $('start').disabled = true; setVerdict('waiting for first window'); };
+  ws.onclose = () => { log('sys', 'disconnected'); $('start').disabled = false; setVerdict('not connected'); };
+  setInterval(pollHealth, 3000);
+};
+
+$('mic').onclick = async () => {
+  if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; micNode && micNode.disconnect(); $('mic').textContent = 'Mic off'; return; }
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+  const src = `class Cap extends AudioWorkletProcessor { constructor(){ super(); this.b = []; }
+    process(inp){ const ch = inp[0][0]; if (ch) { for (const v of ch) this.b.push(v);
+      if (this.b.length >= 320) { const n = this.b.splice(0); const o = new Int16Array(n.length);
+        for (let k = 0; k < n.length; k++) { const s = Math.max(-1, Math.min(1, n[k])); o[k] = s < 0 ? s * 32768 : s * 32767; }
+        this.port.postMessage(o.buffer, [o.buffer]); } } return true; } } registerProcessor('cap', Cap);`;
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+  micNode = new AudioWorkletNode(ctx, 'cap');
+  micNode.port.onmessage = e => { if (ws && ws.readyState === 1) ws.send(e.data); };
+  ctx.createMediaStreamSource(micStream).connect(micNode);
+  $('mic').textContent = 'Mic on — use headphones';
+};
+
+function sendText() {
+  const t = $('msg').value.trim(); if (!t || !ws) return;
+  ws.send(JSON.stringify({ type: 'say', text: t })); log('you', 'you: ' + t); $('msg').value = '';
+}
+$('send').onclick = sendText;
+$('msg').onkeydown = e => { if (e.key === 'Enter') sendText(); };
+</script>
+</body>
+</html>
