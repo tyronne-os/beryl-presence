@@ -1,0 +1,16 @@
+beryl-presence
+Copyright 2026 tyronne-os. All rights reserved.
+
+This repository contains no third-party source code or model weights. setup_gpu.sh downloads the following
+upstream projects at install time; each remains under its own license:
+
+- SoulX-FlashHead (code and SoulX-FlashHead-1_3B weights) -- Soul-AILab -- Apache-2.0
+  https://github.com/Soul-AILab/SoulX-FlashHead
+- Decider (fork: tyronne-os/decider-plugin-brain-beryl of Mapika/decider; weights Mapika/decider-2b) -- Apache-2.0
+- Qwen3-TTS-12Hz-0.6B-CustomVoice and qwen-tts -- Qwen team, Alibaba Cloud -- Apache-2.0
+- wav2vec2-base-960h -- Meta -- Apache-2.0
+- faster-whisper / faster-distil-whisper-large-v3 -- SYSTRAN, Hugging Face -- MIT
+- silero-vad -- Silero Team -- MIT
+- MediaPipe -- Google -- Apache-2.0
+
+The LLM brain is reached over a hosted API and is governed by that provider's terms.
