@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ELANA Playground</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #0a0510;
+    --gold: #d4a574;
+    --orange: #e87d3e;
+    --text: #f0e8ff;
+    --muted: #8b7aa0;
+    --line: #2d1a42;
+    --ok: #4ade80;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: "Inter", system-ui, sans-serif; overflow: hidden; }
+
+  /* Portrait stage — full viewport */
+  #stage {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #05030a;
+  }
+  #portrait {
+    height: 100%; width: 100%; object-fit: cover; object-position: center top;
+    display: block;
+    filter: brightness(.88) saturate(1.05);
+    transition: opacity .3s;
+  }
+  /* GPU live frame overlaid exactly on the portrait */
+  #live-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover; object-position: center top;
+    opacity: 0;
+    transition: opacity .25s;
+  }
+  /* Vignette */
+  #stage::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 80% 100% at 50% 0%, transparent 40%, rgba(5,3,10,.75) 100%);
+    pointer-events: none;
+  }
+
+  /* Top bar */
+  #topbar {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 18px 24px;
+    display: flex; align-items: center; gap: 14px;
+    background: linear-gradient(to bottom, rgba(5,3,10,.9) 0%, transparent 100%);
+    z-index: 10;
+  }
+  #topbar h1 {
+    font-family: "DM Serif Display", Georgia, serif;
+    font-style: italic;
+    font-size: 20px;
+    color: var(--gold);
+    letter-spacing: .01em;
+  }
+  #status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--bad);
+    transition: background .4s;
+    flex-shrink: 0;
+  }
+  #status-dot.live { background: var(--ok); }
+  #status-label { font-size: 12px; color: var(--muted); }
+  #renderer-chip {
+    margin-left: auto;
+    font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted);
+    transition: color .3s, border-color .3s;
+  }
+  #renderer-chip.ready { color: var(--ok); border-color: rgba(74,222,128,.4); }
+  #renderer-chip.warming { color: var(--gold); border-color: rgba(212,165,116,.4); }
+
+  /* Bottom controls */
+  #controls {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    padding: 20px 24px 32px;
+    background: linear-gradient(to top, rgba(5,3,10,.92) 60%, transparent 100%);
+    z-index: 10;
+    display: flex; flex-direction: column; gap: 14px; align-items: center;
+  }
+
+  /* Message row */
+  #msg-row { display: flex; gap: 10px; width: 100%; max-width: 600px; }
+  #msg {
+    flex: 1; background: rgba(22,14,31,.85); border: 1px solid var(--line);
+    color: var(--text); border-radius: 12px; padding: 12px 16px;
+    font: 15px "Inter", system-ui, sans-serif;
+    outline: none; backdrop-filter: blur(8px);
+    transition: border-color .15s;
+  }
+  #msg:focus { border-color: var(--gold); }
+  #msg::placeholder { color: var(--muted); }
+  #send-btn {
+    background: var(--orange); color: #1a0a04; border: none;
+    border-radius: 12px; padding: 12px 20px; font: 600 14px "Inter", sans-serif;
+    cursor: pointer; white-space: nowrap; transition: background .15s;
+  }
+  #send-btn:hover { background: #f0904f; }
+  #send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* Button row */
+  #btn-row { display: flex; gap: 12px; align-items: center; }
+  .ctrl-btn {
+    background: rgba(22,14,31,.8); border: 1px solid var(--line);
+    color: var(--text); border-radius: 999px; padding: 10px 22px;
+    font: 500 13px "Inter", sans-serif; cursor: pointer;
+    backdrop-filter: blur(8px); transition: border-color .15s, background .15s;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .ctrl-btn:hover:not(:disabled) { border-color: var(--gold); }
+  .ctrl-btn:disabled { opacity: .38; cursor: not-allowed; }
+  .ctrl-btn.active { border-color: var(--orange); color: var(--orange); }
+  .ctrl-btn.primary { background: rgba(232,125,62,.18); border-color: var(--orange); color: var(--orange); }
+
+  /* Transcript bubble */
+  #transcript {
+    font-size: 13px; color: var(--muted); max-width: 520px;
+    text-align: center; min-height: 20px;
+    transition: color .3s;
+  }
+  #transcript.elana { color: var(--gold); font-style: italic; }
+
+  /* Mic ring — pulses when listening */
+  @keyframes mic-pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(232,125,62,.5); }
+    50%      { box-shadow: 0 0 0 12px rgba(232,125,62,0); }
+  }
+  #mic-btn.listening { animation: mic-pulse 1s ease infinite; border-color: var(--orange); color: var(--orange); }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <img id="portrait" src="/portrait" alt="ELANA" onerror="this.src='/assets/elana-forever.jpeg'">
+  <canvas id="live-canvas" width="512" height="512" aria-hidden="true"></canvas>
+</div>
+
+<div id="topbar">
+  <h1>ELANA</h1>
+  <span id="status-dot"></span>
+  <span id="status-label">not connected</span>
+  <span id="renderer-chip">renderer —</span>
+</div>
+
+<div id="controls">
+  <div id="transcript">Connect to start a conversation.</div>
+
+  <div id="msg-row">
+    <input id="msg" type="text" placeholder="Say something to ELANA…" disabled autocomplete="off">
+    <button id="send-btn" disabled>Send</button>
+  </div>
+
+  <div id="btn-row">
+    <button id="connect-btn" class="ctrl-btn primary">Connect</button>
+    <button id="mic-btn" class="ctrl-btn" disabled>🎤 Mic</button>
+    <button id="stop-btn" class="ctrl-btn" disabled>■ Stop</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const canvas = $('live-canvas'), g = canvas.getContext('2d');
+
+let ws, audioCtx, nextT = 0, sources = [], micStream, micNode;
+let speaking = false;
+
+// ── live frame overlay ──────────────────────────────────────────────────────
+function showFrame(jpegBytes) {
+  createImageBitmap(new Blob([jpegBytes], { type: 'image/jpeg' })).then(bmp => {
+    canvas.width = bmp.width; canvas.height = bmp.height;
+    g.drawImage(bmp, 0, 0); bmp.close();
+    canvas.style.opacity = '1';
+    speaking = true;
+  });
+}
+function clearFrame() {
+  canvas.style.opacity = '0';
+  speaking = false;
+}
+
+// ── audio ───────────────────────────────────────────────────────────────────
+function playPcm(buf) {
+  const i16 = new Int16Array(buf), f32 = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768;
+  const ab = audioCtx.createBuffer(1, f32.length, 16000);
+  ab.copyToChannel(f32, 0);
+  const src = audioCtx.createBufferSource();
+  src.buffer = ab; src.connect(audioCtx.destination);
+  const t = Math.max(audioCtx.currentTime + 0.02, nextT);
+  src.start(t); nextT = t + ab.duration;
+  sources.push(src);
+  src.onended = () => { sources = sources.filter(x => x !== src); if (!sources.length) clearFrame(); };
+}
+function stopAudio() {
+  sources.forEach(s => { try { s.stop(); } catch {} });
+  sources = []; nextT = 0; clearFrame();
+}
+
+// ── transcript ───────────────────────────────────────────────────────────────
+function say(cls, text) {
+  const el = $('transcript');
+  el.className = cls; el.textContent = text;
+}
+
+// ── WebSocket messages ───────────────────────────────────────────────────────
+async function onMessage(ev) {
+  if (typeof ev.data !== 'string') {
+    const kind = new Uint8Array(ev.data, 0, 1)[0], body = ev.data.slice(1);
+    if (kind === 0x01) showFrame(body);
+    else if (kind === 0x02) playPcm(body);
+    return;
+  }
+  const m = JSON.parse(ev.data);
+  if (m.type === 'transcript') say('', 'you: ' + m.text);
+  else if (m.type === 'say') say('elana', m.text);
+  else if (m.type === 'barge_in') { stopAudio(); say('', 'interrupted'); }
+  else if (m.type === 'alert' || m.type === 'error') say('', '⚠ ' + m.message);
+  else if (m.type === 'done') { if (!sources.length) clearFrame(); }
+}
+
+// ── connection ───────────────────────────────────────────────────────────────
+$('connect-btn').onclick = () => {
+  audioCtx = new AudioContext({ sampleRate: 16000 });
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws');
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = onMessage;
+  ws.onopen = () => {
+    $('status-dot').className = 'live';
+    $('status-label').textContent = 'live';
+    $('connect-btn').disabled = true;
+    $('mic-btn').disabled = false;
+    $('stop-btn').disabled = false;
+    $('msg').disabled = false;
+    $('send-btn').disabled = false;
+    say('', 'Connected. Say hello or type a message.');
+    pollHealth();
+    setInterval(pollHealth, 10000);
+  };
+  ws.onclose = () => {
+    $('status-dot').className = '';
+    $('status-label').textContent = 'disconnected';
+    $('connect-btn').disabled = false;
+    $('mic-btn').disabled = $('stop-btn').disabled = true;
+    $('msg').disabled = $('send-btn').disabled = true;
+    stopAudio();
+    say('', 'Disconnected. Reconnect to continue.');
+  };
+};
+
+// ── stop ─────────────────────────────────────────────────────────────────────
+$('stop-btn').onclick = () => {
+  stopAudio();
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'stop' }));
+  say('', '—');
+};
+
+// ── mic ──────────────────────────────────────────────────────────────────────
+$('mic-btn').onclick = async () => {
+  if (micStream) {
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null; micNode?.disconnect();
+    $('mic-btn').className = 'ctrl-btn'; $('mic-btn').textContent = '🎤 Mic';
+    return;
+  }
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 }
+  });
+  const worklet = `class Cap extends AudioWorkletProcessor {
+    constructor(){ super(); this.b=[]; }
+    process(inp){ const ch=inp[0][0]; if(ch){ for(const v of ch) this.b.push(v);
+      if(this.b.length>=320){ const n=this.b.splice(0), o=new Int16Array(n.length);
+        for(let k=0;k<n.length;k++){const s=Math.max(-1,Math.min(1,n[k]));o[k]=s<0?s*32768:s*32767;}
+        this.port.postMessage(o.buffer,[o.buffer]); } } return true; } }
+    registerProcessor('cap',Cap);`;
+  await audioCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([worklet],{type:'application/javascript'})));
+  micNode = new AudioWorkletNode(audioCtx, 'cap');
+  micNode.port.onmessage = e => { if (ws && ws.readyState === 1) ws.send(e.data); };
+  audioCtx.createMediaStreamSource(micStream).connect(micNode);
+  $('mic-btn').className = 'ctrl-btn active listening';
+  $('mic-btn').textContent = '🎤 Mic on';
+};
+
+// ── text send ────────────────────────────────────────────────────────────────
+function sendText() {
+  const t = $('msg').value.trim(); if (!t || !ws) return;
+  ws.send(JSON.stringify({ type: 'say', text: t }));
+  say('', 'you: ' + t); $('msg').value = '';
+}
+$('send-btn').onclick = sendText;
+$('msg').onkeydown = e => { if (e.key === 'Enter') sendText(); };
+
+// ── health poll ───────────────────────────────────────────────────────────────
+async function pollHealth() {
+  try {
+    const h = await (await fetch('/health', { signal: AbortSignal.timeout(4000) })).json();
+    const chip = $('renderer-chip');
+    if (h.ready) {
+      chip.textContent = 'renderer ready' + (h.render?.rtf_p50 != null ? '  RTF ' + h.render.rtf_p50.toFixed(2) : '');
+      chip.className = 'ready';
+    } else {
+      chip.textContent = 'renderer warming';
+      chip.className = 'warming';
+    }
+  } catch { $('renderer-chip').textContent = 'renderer —'; $('renderer-chip').className = ''; }
+}
+</script>
+</body>
+</html>

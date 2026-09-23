@@ -424,6 +424,10 @@ def build_app():
     def index():
         return FileResponse(HERE / "viewer.html")
 
+    @app.get("/playground")
+    def playground():
+        return FileResponse(HERE / "playground.html")
+
     @app.get("/portrait")
     def portrait():
         p = Path(state["svc"].s.avatar_image)
