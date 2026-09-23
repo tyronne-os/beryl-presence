@@ -428,6 +428,76 @@ def build_app():
     def health():
         return state["svc"].health()
 
+    @app.websocket("/render")
+    async def ws_render(websocket: WebSocket):
+        """Thin TTS+render endpoint for ELANA's engine.
+        ELANA already handles STT + brain + Beryl; this endpoint only speaks and renders.
+        Client sends: {"type":"speak","text":"...","tone":"warm"}
+        Client sends: {"type":"stop"} to interrupt current render
+        Server streams: 0x01+JPEG frames, 0x02+PCM16@16kHz audio, then {"type":"done"}
+        """
+        import cv2
+        await websocket.accept()
+        svc = state["svc"]
+        if not svc.ready:
+            await websocket.send_json({"type": "error", "message": "service not ready"})
+            await websocket.close()
+            return
+        loop = asyncio.get_running_loop()
+        stopped = False
+
+        async def stream_one(text: str, tone: str):
+            nonlocal stopped
+            stopped = False
+            pcm_f32 = await svc.speak(text, tone)
+            if not len(pcm_f32):
+                await websocket.send_json({"type": "done"})
+                return
+            n = svc.renderer.slice_samples
+            pad = (-len(pcm_f32)) % n
+            chunks = np.pad(pcm_f32, (0, pad)).reshape(-1, n)
+            for chunk in chunks:
+                if stopped:
+                    break
+                frames, _ = await loop.run_in_executor(svc.render_pool, svc.renderer.render, chunk.copy())
+                if stopped:
+                    break
+                await websocket.send_bytes(b"\x02" + (chunk * 32767).astype("<i2").tobytes())
+                for frame in frames:
+                    if stopped:
+                        break
+                    ok, jpg = cv2.imencode(".jpg", frame[:, :, ::-1], [cv2.IMWRITE_JPEG_QUALITY, 82])
+                    if ok:
+                        await websocket.send_bytes(b"\x01" + jpg.tobytes())
+            await websocket.send_json({"type": "done"})
+
+        current: asyncio.Task | None = None
+        try:
+            while True:
+                msg = await websocket.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                if not msg.get("text"):
+                    continue
+                j = json.loads(msg["text"])
+                if j.get("type") == "stop":
+                    stopped = True
+                    if current and not current.done():
+                        current.cancel()
+                    continue
+                if j.get("type") == "speak" and j.get("text", "").strip():
+                    if current and not current.done():
+                        stopped = True
+                        current.cancel()
+                    current = asyncio.create_task(stream_one(j["text"].strip(), j.get("tone", "warm")))
+                    await current
+        except WebSocketDisconnect:
+            pass
+        finally:
+            stopped = True
+            if current and not current.done():
+                current.cancel()
+
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
         await websocket.accept()
