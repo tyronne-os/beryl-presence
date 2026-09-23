@@ -424,6 +424,14 @@ def build_app():
     def index():
         return FileResponse(HERE / "viewer.html")
 
+    @app.get("/portrait")
+    def portrait():
+        p = Path(state["svc"].s.avatar_image)
+        if p.exists():
+            return FileResponse(p, media_type="image/jpeg")
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "portrait not found"}, status_code=404)
+
     @app.get("/health")
     def health():
         return state["svc"].health()

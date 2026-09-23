@@ -4,7 +4,7 @@
 #
 #   BERYL_AVATAR_IMAGE=/path/to/beryl.png BRAIN_API_KEY=nvapi-... bash run.sh
 #
-# BERYL_AVATAR_IMAGE  square, face-centred portrait (default: FlashHead's example image)
+# BERYL_AVATAR_IMAGE  square, face-centred portrait (default: assets/elana-forever.jpeg)
 # BRAIN_API_KEY       key for the offloaded brain (default endpoint: NVIDIA NIM). Use a key scoped to this box,
 #                     not the director's personal nvapi- key. Without it Beryl only echoes what she heard.
 # BRAIN_MODEL         any model id your endpoint serves (default meta/llama-3.1-405b-instruct; a Nemotron id
@@ -51,7 +51,8 @@ wait_ok tts     http://127.0.0.1:8010/health 600 "$LOG/tts.log" '"ok":true'
 # faster-whisper (CTranslate2) needs the cuBLAS/cuDNN that pip installed inside the render venv
 NVLIB=$("$RP" -c 'import nvidia.cublas.lib as a, nvidia.cudnn.lib as b; print(a.__path__[0] + ":" + b.__path__[0])' 2>/dev/null || true)
 export LD_LIBRARY_PATH="${NVLIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export BERYL_ROOT="$ROOT" BERYL_OUT="$ROOT/out" STT_MODEL="$ROOT/models/faster-distil-whisper-large-v3"
+BERYL_AVATAR_IMAGE="${BERYL_AVATAR_IMAGE:-$APP/assets/elana-forever.jpeg}"
+export BERYL_ROOT="$ROOT" BERYL_OUT="$ROOT/out" STT_MODEL="$ROOT/models/faster-distil-whisper-large-v3" BERYL_AVATAR_IMAGE
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 step "selftest: does she actually talk?"
